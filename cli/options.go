@@ -214,7 +214,7 @@ func ParseCommonHTTPOptions(c *cli.Context) (libgobuster.HTTPOptions, error) {
 
 func GlobalOptions() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{Name: "wordlist", Aliases: []string{"w"}, Usage: "Path to the wordlist. Set to - to use STDIN.", Required: true},
+		&cli.StringFlag{Name: "wordlist", Aliases: []string{"w"}, Usage: "Path to the wordlist. Set to - to use STDIN. Can also be a URL (http/https).", Required: true},
 		&cli.DurationFlag{Name: "delay", Aliases: []string{"d"}, Usage: "Time each thread waits between requests (e.g. 1500ms)"},
 		&cli.IntFlag{Name: "threads", Aliases: []string{"t"}, Value: 10, Usage: "Number of concurrent threads"},
 		&cli.IntFlag{Name: "wordlist-offset", Aliases: []string{"wo"}, Value: 0, Usage: "Resume from a given position in the wordlist"},
@@ -235,6 +235,8 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 	opts.Wordlist = c.String("wordlist")
 	if opts.Wordlist == "-" { // nolint:revive
 		// STDIN
+	} else if strings.HasPrefix(opts.Wordlist, "http://") || strings.HasPrefix(opts.Wordlist, "https://") {
+		// URL
 	} else if _, err := os.Stat(opts.Wordlist); os.IsNotExist(err) {
 		return opts, fmt.Errorf("wordlist file %q does not exist: %w", opts.Wordlist, err)
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -171,7 +170,7 @@ func (g *Gobuster) feedWordlist(ctx context.Context, guessChan chan<- *Guess, wo
 	}
 }
 
-func (g *Gobuster) getWordlist(wordlist io.ReadSeeker) (*Wordlist, error) {
+func (g *Gobuster) getWordlist(wordlist io.Reader) (*Wordlist, error) {
 	// calculate expected requests
 	var guessesPerLine int
 	if len(g.Opts.Patterns) > 0 {
@@ -181,12 +180,19 @@ func (g *Gobuster) getWordlist(wordlist io.ReadSeeker) (*Wordlist, error) {
 		guessesPerLine = 1 + g.plugin.AdditionalWordsLen()
 	}
 
-	if g.Opts.Wordlist == "-" {
-		// Read directly from stdin
-		return &Wordlist{scanner: bufio.NewScanner(os.Stdin), guessesPerLine: guessesPerLine, isStream: true}, nil
+	wType := GetWordlistType(g.Opts.Wordlist)
+	if wType != WordlistTypeFile {
+		// STDIN or URL
+		return &Wordlist{scanner: bufio.NewScanner(wordlist), guessesPerLine: guessesPerLine, isStream: true}, nil
 	}
 
-	lines, err := lineCounter(wordlist)
+	// Local file
+	readSeeker, ok := wordlist.(io.ReadSeeker)
+	if !ok {
+		return nil, fmt.Errorf("wordlist is not a seeker")
+	}
+
+	lines, err := lineCounter(readSeeker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get number of lines: %w", err)
 	}
@@ -201,12 +207,12 @@ func (g *Gobuster) getWordlist(wordlist io.ReadSeeker) (*Wordlist, error) {
 	g.Progress.incrementRequestsIssues(g.Opts.WordlistOffset * guessesPerLine)
 
 	// rewind wordlist after lineCounter
-	_, err = wordlist.Seek(0, 0)
+	_, err = readSeeker.Seek(0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to rewind wordlist: %w", err)
 	}
 
-	wordlistScanner := bufio.NewScanner(wordlist)
+	wordlistScanner := bufio.NewScanner(readSeeker)
 
 	// skip lines
 	for range g.Opts.WordlistOffset {
@@ -243,15 +249,13 @@ func (g *Gobuster) Run(ctx context.Context) error {
 	guessChan := make(chan *Guess, g.Opts.Threads*3)
 	successChan := make(chan *Guess)
 
-	var f io.ReadSeekCloser
-	if g.Opts.Wordlist != "-" { // stdin case is handled inside getWordlist
-		var err error
-		f, err = os.Open(g.Opts.Wordlist)
-		if err != nil {
-			return fmt.Errorf("failed to open wordlist: %w", err)
-		}
-		defer f.Close()
+	var f io.ReadCloser
+	var err error
+	f, err = OpenWordlist(ctx, g.Opts.Wordlist)
+	if err != nil {
+		return err
 	}
+	defer f.Close()
 
 	wordlist, err := g.getWordlist(f)
 	if err != nil {
